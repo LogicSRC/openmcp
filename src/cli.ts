@@ -58,7 +58,7 @@ const HELP = `openmcp ${VERSION}: an open catalog of MCP relays.
 
   serve [--port 8790] [--db openmcp.db] [--url https://catalog.example] [--admin-token t]
   relays [q] [--tag t] [--online]        the relays, and what each offers
-  add <url>                              register a relay by any URL on its origin
+  add <url> [more...] [--file list.txt]  register relays by any URL on their origin (up to 1,000)
   show <id> | tools <id> | refresh <id> | rm <id>
   find <words>                           search every relay's tools
   call <id> <tool> ['{"json":"args"}'] [--relay-token t]
@@ -173,7 +173,24 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "add": {
-      if (!rest[0]) throw new Error("Usage: openmcp add <url>");
+      const file = typeof flags.file === "string" ? flags.file : undefined;
+      const many = [...rest.slice(1), ...(file ? readFileSync(file === "-" ? 0 : file, "utf8").split(/[\s,]+/) : [])].filter(Boolean);
+      if (many.length) {
+        const started = await client.registerMany([rest[0] as string, ...many].filter(Boolean));
+        let job = started.job;
+        while (!job.finishedAt) {
+          await new Promise((r) => setTimeout(r, 2000));
+          job = await client.bulkJob(job.id);
+          if (!json) process.stderr.write(`\r${job.done}/${job.total} probed`);
+        }
+        if (!json) process.stderr.write("\n");
+        print(job, () => {
+          for (const r of job.results) out(`${r.ok ? "ok " : "no "} ${r.url.padEnd(44)} ${r.ok ? `${r.id} ${r.online ? "online" : "offline"} ${r.tools ?? 0} tools` : r.error ?? ""}`);
+          out(`${job.results.filter((r) => r.ok).length} of ${job.total} listed.`);
+        });
+        return 0;
+      }
+      if (!rest[0]) throw new Error("Usage: openmcp add <url> [more urls] [--file list.txt]");
       const relay = await client.register(rest[0]);
       print(relay, () => {
         out(`${relay.id}: ${relay.online ? "online" : `offline (${relay.lastError})`}, ${relay.tools.length} tools, ${relay.verified ? "verified" : "not verified: serve /.well-known/openmcp.json to be"}.`);

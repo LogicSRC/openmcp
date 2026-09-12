@@ -1,6 +1,6 @@
 {
   "name": "@logicsrc/openmcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "OpenMCP: an open catalog of MCP relays. A reference catalog server, and a client that speaks REST, MCP and webhooks.",
   "license": "MIT",
   "type": "module",

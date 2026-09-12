@@ -69,6 +69,32 @@ create table if not exists sessions (
 `;
 
 /** Columns added after the first release, applied when missing. */
+const JOBS = `
+create table if not exists probe_jobs (
+  id text primary key, created_at text not null, finished_at text, total integer not null, done integer not null default 0, results text not null
+);
+`;
+
+export interface ProbeResult {
+  url: string;
+  ok: boolean;
+  id?: string;
+  online?: boolean;
+  verified?: boolean;
+  name?: string;
+  tools?: number;
+  error?: string;
+}
+
+export interface ProbeJob {
+  id: string;
+  createdAt: string;
+  finishedAt: string | null;
+  total: number;
+  done: number;
+  results: ProbeResult[];
+}
+
 const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [{ table: "relays", column: "owner_id", ddl: "alter table relays add column owner_id text" }];
 
 export interface RelayQuery {
@@ -86,6 +112,7 @@ export class Catalog {
     if (path !== ":memory:") this.db.exec("pragma journal_mode = wal;");
     this.db.exec("pragma foreign_keys = on;");
     this.db.exec(SCHEMA);
+    this.db.exec(JOBS);
     for (const { table, column, ddl } of COLUMNS) {
       const present = (this.db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>).some((row) => row.name === column);
       if (!present) this.db.exec(ddl);
@@ -232,6 +259,23 @@ export class Catalog {
       }
     }
     return out;
+  }
+
+  // --- bulk probe jobs ------------------------------------------------------------------
+
+  createJob(id: string, total: number): ProbeJob {
+    const job: ProbeJob = { id, createdAt: new Date().toISOString(), finishedAt: null, total, done: 0, results: [] };
+    this.db.prepare("insert into probe_jobs (id, created_at, finished_at, total, done, results) values (?, ?, ?, ?, ?, ?)").run(job.id, job.createdAt, null, total, 0, "[]");
+    return job;
+  }
+
+  updateJob(job: ProbeJob): void {
+    this.db.prepare("update probe_jobs set finished_at = ?, done = ?, results = ? where id = ?").run(job.finishedAt, job.done, JSON.stringify(job.results), job.id);
+  }
+
+  getJob(id: string): ProbeJob | null {
+    const row = this.db.prepare("select * from probe_jobs where id = ?").get(id) as { id: string; created_at: string; finished_at: string | null; total: number; done: number; results: string } | undefined;
+    return row ? { id: row.id, createdAt: row.created_at, finishedAt: row.finished_at, total: Number(row.total), done: Number(row.done), results: JSON.parse(row.results) as ProbeResult[] } : null;
   }
 
   // --- webhooks ------------------------------------------------------------------
