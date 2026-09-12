@@ -30,9 +30,9 @@ import { PROTOCOL_VERSION, failure, isNotification, isRequest, result, INVALID_P
 import { CATALOG_EVENTS, OPENMCP_VERSION, relayId, type CatalogDescriptor, type CatalogEvent } from "./spec.ts";
 import { createMailer, type Mailer } from "./mail.ts";
 import { clearedSessionCookie, consumeSignInLink, cookieValue, endSession, requestSignInLink, sessionCookie, userForSession, SESSION_COOKIE, type AuthContext, type SessionUser } from "./auth.ts";
-import { directoryPage, linkFailedPage, linkSentPage, mePage, relayPage, signInPage, tagsPage, type PageContext } from "./pages.ts";
+import { directoryPage, linkFailedPage, linkSentPage, mePage, bulkPage, relayPage, signInPage, tagsPage, type PageContext } from "./pages.ts";
 
-export const VERSION = "0.3.1";
+export const VERSION = "0.4.0";
 
 /**
  * The installer, served from the package itself so the line on every page,
@@ -339,6 +339,88 @@ export function createApp(options: ServerOptions): Hono {
       limit: Number(c.req.query("limit") ?? 100),
     });
     return c.json({ ok: true, relays, total: relays.length });
+  });
+
+  /** Up to a thousand at once: {urls: [...]} or a text/plain list. Answers a job to poll; each URL is registered exactly as a single one would be. */
+  const BULK_LIMIT = 1000;
+  const BULK_CONCURRENCY = 16;
+  const parseBulk = (text: string): { urls: string[]; rejected: string[] } => {
+    const seen = new Set<string>();
+    const urls: string[] = [];
+    const rejected: string[] = [];
+    for (const raw of text.split(/[\s,]+/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const candidate = /^https?:\/\//i.test(line) ? line : `https://${line}`;
+      try {
+        const parsed = new URL(candidate);
+        const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+        if (!host.includes(".") || seen.has(host)) continue;
+        seen.add(host);
+        urls.push(parsed.toString());
+      } catch {
+        rejected.push(line);
+      }
+      if (urls.length >= BULK_LIMIT) break;
+    }
+    return { urls, rejected };
+  };
+  const bulkRegister = (urls: string[], user: SessionUser | null): import("./db.ts").ProbeJob => {
+    const job = store.createJob(`job_${randomBytes(8).toString("hex")}`, urls.length);
+    const queue = [...urls];
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const given = queue.shift();
+        if (!given) return;
+        let result: import("./db.ts").ProbeResult;
+        try {
+          const outcome = await register(given, user);
+          result = outcome.ok && outcome.record ? { url: given, ok: true, id: outcome.record.id, online: outcome.record.online, verified: outcome.record.verified, name: outcome.record.descriptor.name, tools: outcome.record.tools.length } : { url: given, ok: false, error: outcome.message };
+        } catch (error) {
+          result = { url: given, ok: false, error: (error as Error).message };
+        }
+        job.results.push(result);
+        job.done++;
+        if (job.done === job.total) job.finishedAt = new Date().toISOString();
+        store.updateJob(job);
+      }
+    };
+    void Promise.all(Array.from({ length: Math.min(BULK_CONCURRENCY, urls.length) }, worker)).then(() => log(`bulk ${job.id}: ${job.results.filter((r) => r.ok).length}/${job.total} listed`));
+    return job;
+  };
+
+  app.post("/v1/relays/bulk", async (c) => {
+    const type = c.req.header("content-type") ?? "";
+    let text = "";
+    if (type.includes("application/json")) {
+      const body = (await c.req.json().catch(() => ({}))) as { urls?: unknown; text?: unknown };
+      text = Array.isArray(body.urls) ? body.urls.filter((u): u is string => typeof u === "string").join("\n") : typeof body.text === "string" ? body.text : "";
+    } else text = await c.req.text();
+    const parsed = parseBulk(text);
+    if (!parsed.urls.length) return c.json({ ok: false, error: "Send {urls: [...]} or a text list, one relay URL or domain per line, up to 1000." }, 400);
+    const job = bulkRegister(parsed.urls, who(c));
+    return c.json({ ok: true, job, rejected: parsed.rejected, poll: `${url}/v1/relays/bulk/${job.id}`, page: `${url}/bulk/${job.id}` }, 202);
+  });
+
+  app.get("/v1/relays/bulk/:job", (c) => {
+    const job = store.getJob(c.req.param("job"));
+    return job ? c.json({ ok: true, job }) : c.json({ ok: false, error: "No such job." }, 404);
+  });
+
+  app.post("/me/relays/bulk", async (c) => {
+    const p = page(c);
+    if (!p.user) return c.redirect("/sign-in");
+    if (!sameSite(c)) return c.text("Forbidden", 403);
+    const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+    const parsed = parseBulk(typeof form.urls === "string" ? form.urls : "");
+    if (!parsed.urls.length) return c.html(mePage(p, store.listRelaysByOwner(p.user.id), { text: "Paste at least one relay URL or domain.", bad: true }), 422);
+    const job = bulkRegister(parsed.urls, p.user);
+    return c.redirect(`/bulk/${job.id}`);
+  });
+
+  app.get("/bulk/:job", (c) => {
+    const job = store.getJob(c.req.param("job"));
+    return job ? c.html(bulkPage(page(c), job)) : c.notFound();
   });
 
   app.post("/v1/relays", async (c) => {

@@ -174,6 +174,22 @@ export function mePage(ctx: PageContext, relays: RelayRecord[], flash?: { text: 
 ${flash ? `<p class="flash${flash.bad ? " bad" : ""}">${esc(flash.text)}</p>` : ""}
 <h2>Add a relay</h2><form method="post" action="/me/relays" class="search"><input type="url" name="url" placeholder="https://your.site (its /.well-known/openmcp.json, its MCP endpoint, or just the site)" required><button type="submit">Probe and list</button></form>
 <p class="meta">No descriptor yet? <code>npx @logicsrc/openmcp descriptor https://your.site/mcp</code> prints one to serve at <code>/.well-known/openmcp.json</code>, and the listing becomes verified.</p>
+<details><summary>Add many at once (up to 1,000)</summary><form method="post" action="/me/relays/bulk"><textarea name="urls" rows="8" style="width:100%;font:13px ui-monospace,monospace" placeholder="one relay URL or domain per line, or comma-separated"></textarea><p class="meta">Each is probed like a single registration: descriptor from its origin, then the MCP handshake. Those that answer are listed as yours; the rest are reported and nothing else happens.</p><button type="submit">Probe and list them all</button></form></details>
 <h2>Registered by you</h2><table><tr><th>Relay</th><th>Endpoint</th><th></th></tr>${rows}</table>`,
+  );
+}
+
+export function bulkPage(ctx: PageContext, job: { id: string; total: number; done: number; finishedAt: string | null; results: Array<{ url: string; ok: boolean; id?: string; online?: boolean; verified?: boolean; name?: string; tools?: number; error?: string }> }): string {
+  const listed = job.results.filter((r) => r.ok);
+  const failed = job.results.filter((r) => !r.ok);
+  const rows = [...listed, ...failed]
+    .map((r) => `<tr><td>${r.ok ? `<a href="/relays/${encodeURIComponent(r.id ?? "")}">${esc(r.name ?? r.id)}</a>` : esc(r.url)}</td><td>${r.ok ? `${r.online ? "online" : "offline"}${r.verified ? ", verified" : ""}, ${r.tools ?? 0} tools` : "not listed"}</td><td class="meta">${esc(r.error ?? r.url)}</td></tr>`)
+    .join("");
+  return layout(
+    ctx,
+    "Bulk registration",
+    `${job.finishedAt ? "" : '<meta http-equiv="refresh" content="3">'}<h1>Bulk registration</h1><p class="lead">Job <code>${esc(job.id)}</code>: ${job.done} of ${job.total} probed${job.finishedAt ? "" : ", refreshing"}. ${listed.length} listed, ${failed.length} did not answer as a relay.</p>
+<table><tr><th>Relay</th><th>Result</th><th>Detail</th></tr>${rows || '<tr><td colspan="3" class="empty">Probing.</td></tr>'}</table>
+<p class="meta"><a href="/me">My relays</a> · <a href="/v1/relays/bulk/${esc(job.id)}">JSON</a></p>`,
   );
 }

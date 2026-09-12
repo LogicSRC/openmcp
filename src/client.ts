@@ -101,6 +101,20 @@ export class OpenMcpClient {
     return (await this.rest<{ relay: RelayRecord }>("GET", `/v1/relays/${encodeURIComponent(id)}`)).relay;
   }
 
+  /** Register many at once. Answers a job; poll bulkJob until finishedAt is set. */
+  async registerMany(urls: string[]): Promise<{ job: { id: string; total: number; done: number; finishedAt: string | null; results: Array<{ url: string; ok: boolean; id?: string; online?: boolean; verified?: boolean; name?: string; tools?: number; error?: string }> }; rejected: string[]; page: string }> {
+    const response = await this.fetcher(`${this.url}/v1/relays/bulk`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json", ...(this.options.token ? { authorization: `Bearer ${this.options.token}` } : {}) }, body: JSON.stringify({ urls }) });
+    const body = (await response.json()) as { ok: boolean; error?: string; job: never; rejected: string[]; page: string };
+    if (!body.ok) throw new Error(body.error ?? `bulk answered ${response.status}`);
+    return body;
+  }
+  async bulkJob(id: string): Promise<{ id: string; total: number; done: number; finishedAt: string | null; results: Array<{ url: string; ok: boolean; id?: string; online?: boolean; verified?: boolean; name?: string; tools?: number; error?: string }> }> {
+    const response = await this.fetcher(`${this.url}/v1/relays/bulk/${encodeURIComponent(id)}`, { headers: { accept: "application/json" } });
+    const body = (await response.json()) as { ok: boolean; error?: string; job: never };
+    if (!body.ok) throw new Error(body.error ?? `job answered ${response.status}`);
+    return body.job;
+  }
+
   async register(url: string): Promise<RelayRecord> {
     if (this.transport === "mcp") return (await this.catalogMcp().call<{ relay: RelayRecord }>("register_relay", { url })).relay;
     return (await this.rest<{ relay: RelayRecord }>("POST", "/v1/relays", { url })).relay;
