@@ -12,14 +12,24 @@
   "bin": {
     "openmcp": "bin/openmcp.mjs"
   },
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "exports": {
-    ".": "./src/index.ts",
-    "./client": "./src/client.ts",
-    "./server": "./src/server.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    }
   },
   "files": [
     "bin",
+    "dist",
     "src",
     "docs",
     "README.md",
@@ -29,9 +39,11 @@
     "node": ">=24"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "start": "node bin/openmcp.mjs serve",
     "test": "node --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
@@ -49,5 +61,6 @@
     "directory",
     "webhooks",
     "logicsrc"
-  ]
+  ],
+  "types": "dist/index.d.ts"
 }

@@ -1,4 +1,11 @@
-# Debian, not Alpine: the Obscura binary needs glibc 2.35 or later.
+FROM node:24-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
+RUN npm ci --no-audit --no-fund
+COPY src ./src
+RUN npm run build
+
+# Debian, not Alpine, for the runtime: the Obscura binary needs glibc 2.35 or later.
 FROM node:24-bookworm-slim
 ARG OBSCURA_VERSION=0.2.2
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -10,8 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
+COPY --from=build /app/dist ./dist
 COPY bin ./bin
-COPY src ./src
 COPY docs ./docs
 ENV PORT=8790 OPENMCP_DB=/data/openmcp.db NODE_ENV=production OBSCURA_BIN=/usr/local/bin/obscura
 VOLUME ["/data"]
