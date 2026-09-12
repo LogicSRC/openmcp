@@ -20,6 +20,7 @@
  */
 import { readFileSync } from "node:fs";
 import { OpenMcpClient, verifySignature } from "./client.ts";
+import { INSTALL_SITE, installLine, uninstall, update, whereIsIt } from "./manage.ts";
 import { Catalog } from "./db.ts";
 import { descriptorTemplate, probeRelay } from "./probe.ts";
 import { serve, VERSION } from "./server.ts";
@@ -50,6 +51,9 @@ const out = (line = ""): void => {
   process.stdout.write(`${line}\n`);
 };
 
+/** The client's catalog when none is named: the public one, which is what the one-line installer is for. `serve` still listens locally. */
+export const DEFAULT_CATALOG = INSTALL_SITE;
+
 const HELP = `openmcp ${VERSION}: an open catalog of MCP relays.
 
   serve [--port 8790] [--db openmcp.db] [--url https://catalog.example] [--admin-token t]
@@ -63,12 +67,14 @@ const HELP = `openmcp ${VERSION}: an open catalog of MCP relays.
   peer list | add <url> | rm <url> | sync
   probe <url>                            what a catalog would find, without one
   descriptor <mcp url> [--name n]        a /.well-known/openmcp.json to serve
+  update | uninstall [--yes] | where     this command itself, when the installer put it here
 
-  --catalog <url>   the catalog (or $OPENMCP_CATALOG; default http://127.0.0.1:8790)
+  --catalog <url>   the catalog (or $OPENMCP_CATALOG; default ${DEFAULT_CATALOG})
   --token <t>       the catalog's admin token (or $OPENMCP_TOKEN)
   --transport mcp   talk to the catalog over MCP instead of REST
   --json            print the payload and nothing else
 
+Install: ${installLine()}
 Spec: https://logicsrc.com/openmcp`;
 
 function relayLine(relay: RelayRecord): string {
@@ -144,8 +150,15 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  // The command itself. These read the manifest install.sh wrote; a copy npm
+  // put somewhere has none, and they say so rather than guess.
+  const io = { out, err: (line: string): void => void process.stderr.write(`${line}\n`) };
+  if (command === "update") return update(io);
+  if (command === "uninstall") return uninstall(io, { yes: flags.yes === true });
+  if (command === "where") return whereIsIt(io);
+
   const client = new OpenMcpClient({
-    url: String(flags.catalog ?? process.env.OPENMCP_CATALOG ?? "http://127.0.0.1:8790"),
+    url: String(flags.catalog ?? process.env.OPENMCP_CATALOG ?? DEFAULT_CATALOG),
     transport: flags.transport === "mcp" ? "mcp" : "rest",
     token: typeof flags.token === "string" ? flags.token : process.env.OPENMCP_TOKEN,
   });

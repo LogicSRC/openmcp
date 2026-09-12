@@ -1,6 +1,6 @@
 {
   "name": "@logicsrc/openmcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "OpenMCP: an open catalog of MCP relays. A reference catalog server, and a client that speaks REST, MCP and webhooks.",
   "license": "MIT",
   "type": "module",
@@ -30,6 +30,7 @@
   "files": [
     "bin",
     "dist",
+    "install.sh",
     "src",
     "docs",
     "README.md",

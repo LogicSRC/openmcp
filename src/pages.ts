@@ -9,6 +9,7 @@
  */
 import type { RelayRecord } from "./spec.ts";
 import type { SessionUser } from "./auth.ts";
+import { installLine } from "./manage.ts";
 
 export const esc = (value: unknown): string =>
   String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch] as string);
@@ -72,7 +73,7 @@ export function layout(ctx: PageContext, title: string, body: string): string {
 <style>${CSS}</style></head>
 <body><header><div class="in"><a class="brand" href="/">${esc(ctx.siteName)}</a><span class="meta">${ctx.counts.relays} relays · ${ctx.counts.online} online</span><nav><a href="/tags">Tags</a><a href="https://logicsrc.com/openmcp">Spec</a><a href="/.well-known/openmcp.json">JSON</a>${nav}</nav></div></header>
 <main>${body}</main>
-<footer>An <a href="https://logicsrc.com/openmcp">OpenMCP</a> catalog. Agents: <code>POST ${esc(ctx.url)}/mcp</code> or <code>GET ${esc(ctx.url)}/v1/relays</code>. Maintained by <a href="https://profullstack.com">Profullstack</a>.</footer>
+<footer>An <a href="https://logicsrc.com/openmcp">OpenMCP</a> catalog. Agents: <code>POST ${esc(ctx.url)}/mcp</code> or <code>GET ${esc(ctx.url)}/v1/relays</code>. From a terminal: <code>${esc(installLine(ctx.url))}</code>. Maintained by <a href="https://profullstack.com">Profullstack</a>.</footer>
 </body></html>`;
 }
 
@@ -94,7 +95,11 @@ export function directoryPage(ctx: PageContext, input: { relays: RelayRecord[]; 
     input.q ? `Relays matching "${input.q}"` : input.tag ? `Relays tagged ${input.tag}` : "Relays",
     `<h1>MCP relays you can reach</h1><p class="lead">MCP servers over HTTP, listed by what they offer and verified against what they say about themselves. What is listed is what the probe found. Any agent that can reach this catalog can reach every relay in it.</p>
 <form class="search" method="get" action="/"><input type="text" name="q" placeholder="Search names, descriptions, tags and tool names" value="${esc(input.q ?? "")}"><button type="submit">Search</button>${input.tag ? `<input type="hidden" name="tag" value="${esc(input.tag)}">` : ""}</form>
-<div class="chips">${input.tag ? `<a class="chip" href="/">all</a>` : ""}${chips}</div>${list}`,
+<div class="chips">${input.tag ? `<a class="chip" href="/">all</a>` : ""}${chips}</div>${list}
+<h2>From a terminal</h2><pre>${esc(installLine(ctx.url))}
+openmcp relays                       # what is listed here
+openmcp find "fetch a page"          # search every relay's tools
+openmcp add https://your.site        # register a relay you operate</pre><p class="meta">One line, under your home directory, no root; Node 24 is fetched if the box has none. <code>openmcp update</code> and <code>openmcp uninstall</code> do what they say.</p>`,
   );
 }
 
@@ -127,7 +132,8 @@ ${r.server?.name ? `<tr><th>Server</th><td>${esc(r.server.name)} ${esc(r.server.
 <tr><th>Descriptor</th><td><a href="${esc(r.source)}">${esc(r.source)}</a></td></tr>
 </table>
 <h2>Tools</h2>${tools}
-<h2>Use it</h2><pre>openmcp call ${esc(r.id)} ${esc(r.tools[0]?.name ?? "<tool>")} '{}' --catalog ${esc(ctx.url)}
+<h2>Use it</h2><pre>${esc(installLine(ctx.url))}   # once: the openmcp command, no root
+openmcp call ${esc(r.id)} ${esc(r.tools[0]?.name ?? "<tool>")} '{}' --catalog ${esc(ctx.url)}
 curl -X POST ${esc(ctx.url)}/v1/relays/${esc(r.id)}/call -H 'content-type: application/json' -d '{"tool":"${esc(r.tools[0]?.name ?? "<tool>")}","arguments":{}}'</pre>
 <p class="meta"><a href="/v1/relays/${encodeURIComponent(r.id)}">This record as JSON</a></p>`,
   );

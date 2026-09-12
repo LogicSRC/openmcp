@@ -20,6 +20,7 @@
  */
 import { Hono } from "hono";
 import { randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { Catalog } from "./db.ts";
 import { probeRelay } from "./probe.ts";
 import { deliver } from "./webhooks.ts";
@@ -31,7 +32,15 @@ import { createMailer, type Mailer } from "./mail.ts";
 import { clearedSessionCookie, consumeSignInLink, cookieValue, endSession, requestSignInLink, sessionCookie, userForSession, SESSION_COOKIE, type AuthContext, type SessionUser } from "./auth.ts";
 import { directoryPage, linkFailedPage, linkSentPage, mePage, relayPage, signInPage, tagsPage, type PageContext } from "./pages.ts";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
+
+/**
+ * The installer, served from the package itself so the line on every page,
+ * `curl -fsSL <catalog>/install.sh | sh`, installs exactly the release the
+ * catalog runs. Read once; it lives at the package root next to bin/ and
+ * dist/, which is one directory up from src/ and from dist/ alike.
+ */
+const INSTALL_SCRIPT = readFileSync(new URL("../install.sh", import.meta.url), "utf8");
 
 /** An MCP relay that lives inside the catalog process. */
 export interface HostedRelay {
@@ -184,6 +193,15 @@ export function createApp(options: ServerOptions): Hono {
   });
 
   app.get("/healthz", (c) => c.json({ ok: true, version: VERSION, ...store.counts() }));
+  // `curl -fsSL <catalog>/install.sh | sh`. The script defaults OPENMCP_SITE to
+  // the public catalog; served from here it names this catalog instead, so
+  // `openmcp update` comes back to the same place.
+  app.get("/install.sh", (c) =>
+    c.body(INSTALL_SCRIPT.replace('SITE="${OPENMCP_SITE:-https://openmcp.logicsrc.com}"', `SITE="\${OPENMCP_SITE:-${url}}"`), 200, {
+      "content-type": "text/x-shellscript; charset=utf-8",
+      "cache-control": "public, max-age=300",
+    }),
+  );
   app.get("/.well-known/openmcp.json", (c) => c.json(descriptor()));
 
   // --- pages ------------------------------------------------------------------

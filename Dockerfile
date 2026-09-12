@@ -20,6 +20,7 @@ RUN npm ci --omit=dev --no-audit --no-fund
 COPY --from=build /app/dist ./dist
 COPY bin ./bin
 COPY docs ./docs
+COPY install.sh ./install.sh
 ENV PORT=8790 OPENMCP_DB=/data/openmcp.db NODE_ENV=production OBSCURA_BIN=/usr/local/bin/obscura
 VOLUME ["/data"]
 EXPOSE 8790
