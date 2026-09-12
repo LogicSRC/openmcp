@@ -20,7 +20,7 @@ import { TOOLS, callTool } from "./mcp/tools.ts";
 import { PROTOCOL_VERSION, failure, isNotification, isRequest, result, INVALID_PARAMS, METHOD_NOT_FOUND, PARSE_ERROR, INTERNAL_ERROR } from "./mcp/protocol.ts";
 import { CATALOG_EVENTS, OPENMCP_VERSION, relayId, type CatalogDescriptor, type CatalogEvent } from "./spec.ts";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 
 export interface ServerOptions {
   store: Catalog;
