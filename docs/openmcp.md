@@ -123,7 +123,9 @@ It exposes three doors to the same records.
 
 A delivery is one `POST` of `{id, event, at, catalog, relay}` with headers `X-OpenMCP-Event`, `X-OpenMCP-Delivery` and `X-OpenMCP-Signature: sha256=<hex HMAC-SHA256 of the raw body under the secret>`. A receiver verifies the signature over the raw body before reading it. Three attempts, then the failure is recorded; fifty consecutive failures and the subscription is inactive but still listed, so its owner can see why. The subscription id is unguessable and is the only handle on it; the secret is shown once.
 
-Registration is open. Anyone may register any relay, because nothing a registrant types is listed: the probe is. Removing a relay and changing peers need the catalog's admin credential.
+Registration is open. Anyone may register any relay, because nothing a registrant types is listed: the probe is. Removing a relay and changing peers need the catalog's admin credential. A catalog may also let a registrant prove an email address and keep the relays they registered that way as theirs to probe again and remove; how it does so is its own business, and the record it serves is the same either way.
+
+A catalog may host relays of its own: MCP servers that run inside the catalog's process. A hosted relay is still a relay. It has its own origin (a subdomain of the catalog is the natural one), serves its own descriptor there, and is probed and listed the way any other relay is, so a reader cannot tell a hosted relay from a listed one except by asking the operator. The reference catalog hosts [Obscura](https://github.com/h4ckf0r0day/obscura), a stealth headless browser, as `fetch_page`.
 
 ## Peering
 

@@ -23,6 +23,7 @@ import { OpenMcpClient, verifySignature } from "./client.ts";
 import { Catalog } from "./db.ts";
 import { descriptorTemplate, probeRelay } from "./probe.ts";
 import { serve, VERSION } from "./server.ts";
+import { obscuraRelay } from "./hosted/obscura.ts";
 import { CATALOG_EVENTS, type CatalogEvent, type RelayRecord } from "./spec.ts";
 
 type Flags = Record<string, string | boolean>;
@@ -91,6 +92,15 @@ export async function main(argv: string[]): Promise<number> {
     const store = new Catalog(String(flags.db ?? process.env.OPENMCP_DB ?? "openmcp.db"));
     const adminToken = typeof flags.adminToken === "string" ? flags.adminToken : process.env.OPENMCP_ADMIN_TOKEN;
     const log = (line: string): void => out(`${new Date().toISOString()}  ${line}`);
+    // OPENMCP_HOSTED names the relays this process serves itself, comma separated. Today: obscura.
+    const hostedNames = String(flags.hosted ?? process.env.OPENMCP_HOSTED ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    const hosted = hostedNames.map((name) => {
+      if (name === "obscura") return obscuraRelay({ operator: process.env.OPENMCP_OPERATOR, log });
+      throw new Error(`Unknown hosted relay "${name}". Known: obscura.`);
+    });
     const running = serve({
       store,
       url,
@@ -98,6 +108,7 @@ export async function main(argv: string[]): Promise<number> {
       adminToken,
       name: process.env.OPENMCP_NAME,
       operator: process.env.OPENMCP_OPERATOR,
+      hosted,
       log,
       refreshEveryMs: Number(process.env.OPENMCP_REFRESH_MINUTES ?? 10) * 60_000,
       syncEveryMs: Number(process.env.OPENMCP_SYNC_MINUTES ?? 30) * 60_000,

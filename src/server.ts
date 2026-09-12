@@ -3,12 +3,20 @@
  *
  * Three doors to the same catalog: REST under /v1, MCP at /mcp, and webhooks
  * out. Plus the two things every OpenMCP host serves: /.well-known/openmcp.json,
- * because a catalog is a relay too, and /healthz.
+ * because a catalog is a relay too, and /healthz. And a fourth door for
+ * people: the same records as HTML, with a sign-in by emailed link for
+ * anyone who wants to register relays of their own and manage them.
  *
  * Registration is open: anyone can add a relay by URL, and what gets listed is
- * what the probe found, never what the registrant typed. Removing a relay or
- * changing peers needs the admin token. A webhook subscription is managed by
- * its own id, which is unguessable and shown once.
+ * what the probe found, never what the registrant typed. A relay registered
+ * while signed in belongs to that person, who can probe it again or remove
+ * it. Removing anyone's relay or changing peers needs the admin token. A
+ * webhook subscription is managed by its own id, which is unguessable and
+ * shown once.
+ *
+ * A catalog can also host relays itself: a hosted relay is a small MCP
+ * server that lives inside this process, served at its own subdomain (so it
+ * can be verified like any other relay) and, as a fallback, under /hosted.
  */
 import { Hono } from "hono";
 import { randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
@@ -19,8 +27,19 @@ import { McpClient, McpToolError, type Fetcher } from "./mcp/client.ts";
 import { TOOLS, callTool } from "./mcp/tools.ts";
 import { PROTOCOL_VERSION, failure, isNotification, isRequest, result, INVALID_PARAMS, METHOD_NOT_FOUND, PARSE_ERROR, INTERNAL_ERROR } from "./mcp/protocol.ts";
 import { CATALOG_EVENTS, OPENMCP_VERSION, relayId, type CatalogDescriptor, type CatalogEvent } from "./spec.ts";
+import { createMailer, type Mailer } from "./mail.ts";
+import { clearedSessionCookie, consumeSignInLink, cookieValue, endSession, requestSignInLink, sessionCookie, userForSession, SESSION_COOKIE, type AuthContext, type SessionUser } from "./auth.ts";
+import { directoryPage, linkFailedPage, linkSentPage, mePage, relayPage, signInPage, tagsPage, type PageContext } from "./pages.ts";
 
-export const VERSION = "0.1.1";
+export const VERSION = "0.2.0";
+
+/** An MCP relay that lives inside the catalog process. */
+export interface HostedRelay {
+  /** The subdomain label and the path segment under /hosted. */
+  slug: string;
+  /** The relay as a Hono app rooted at `base`: it serves /.well-known/openmcp.json and /mcp. */
+  app(base: string, catalogUrl: string): Hono;
+}
 
 export interface ServerOptions {
   store: Catalog;
@@ -33,6 +52,11 @@ export interface ServerOptions {
   operator?: string;
   fetch?: Fetcher;
   log?: (line: string) => void;
+  /** Sends the sign-in links. Absent means one is made from RESEND_API_KEY and MAIL_FROM. */
+  mailer?: Mailer;
+  /** Relays served by this process, each at <slug>.<catalog host> and /hosted/<slug>. */
+  hosted?: HostedRelay[];
+  now?: () => Date;
 }
 
 const sameToken = (a: string, b: string): boolean => {
@@ -41,22 +65,56 @@ const sameToken = (a: string, b: string): boolean => {
   return timingSafeEqual(left, right);
 };
 
+/**
+ * Where a hosted relay is reachable on its own: a subdomain of the catalog.
+ * Null when the catalog has no name to put a subdomain under (an IP address,
+ * localhost), in which case the relay is served under /hosted only and is
+ * not listed, because a relay's descriptor must come from its own origin.
+ */
+export function hostedOrigin(catalogUrl: string, slug: string): string | null {
+  const base = new URL(catalogUrl);
+  if (base.hostname === "localhost" || /^[\d.]+$/.test(base.hostname) || base.hostname.startsWith("[")) return null;
+  try {
+    return new URL(`${base.protocol}//${slug}.${base.host}`).origin;
+  } catch {
+    return null;
+  }
+}
+
 export function createApp(options: ServerOptions): Hono {
   const { store } = options;
   const url = options.url.replace(/\/+$/, "");
   const log = options.log ?? (() => {});
+  const secure = url.startsWith("https://");
+  const siteName = options.name ?? "OpenMCP catalog";
+  const mailer = options.mailer ?? createMailer({ resendKey: process.env.RESEND_API_KEY, from: process.env.MAIL_FROM, log });
+  const auth: AuthContext = { store, mailer, url, name: siteName, log, now: options.now };
   const app = new Hono();
   const ctx = { store, catalogUrl: url, fetch: options.fetch, log };
 
   const bearer = (header: string | undefined): string => (header?.startsWith("Bearer ") ? header.slice(7) : "");
   const isAdmin = (header: string | undefined): boolean => Boolean(options.adminToken) && sameToken(bearer(header), options.adminToken as string);
+  const who = (c: { req: { header(name: string): string | undefined } }): SessionUser | null => userForSession(auth, cookieValue(c.req.header("cookie"), SESSION_COOKIE));
+  const page = (c: { req: { header(name: string): string | undefined } }): PageContext => ({ siteName, url, user: who(c), counts: store.counts() });
+  const wantsHtml = (c: { req: { header(name: string): string | undefined } }): boolean => {
+    const accept = c.req.header("accept") ?? "";
+    return accept.includes("text/html") && !accept.includes("application/json");
+  };
+  /** A form post is only honoured from this site: the cookie is SameSite=Lax and the browser says where the request came from. */
+  const sameSite = (c: { req: { header(name: string): string | undefined } }): boolean => {
+    const site = c.req.header("sec-fetch-site");
+    if (site && site !== "same-origin" && site !== "none") return false;
+    const origin = c.req.header("origin");
+    if (origin && origin !== url && !origin.startsWith("http://localhost") && !origin.startsWith("http://127.0.0.1")) return false;
+    return true;
+  };
 
   const descriptor = (): CatalogDescriptor => {
     const counts = store.counts();
     return {
       openmcp: OPENMCP_VERSION,
       mcp: `${url}/mcp`,
-      name: options.name ?? "OpenMCP catalog",
+      name: siteName,
       description: options.description ?? "A catalog of MCP relays. List them, find a tool, call it through here.",
       url,
       auth: { kind: "none" },
@@ -68,22 +126,49 @@ export function createApp(options: ServerOptions): Hono {
     };
   };
 
-  app.get("/", (c) =>
-    c.json({
-      name: options.name ?? "OpenMCP catalog",
+  // --- hosted relays ------------------------------------------------------------------
+  // Each one answers at its own subdomain, so a probe finds the descriptor on
+  // the relay's own origin and the record is verified; and under /hosted/<slug>
+  // on the catalog's origin, for a reader without the DNS.
+  const byHost = new Map<string, Hono>();
+  for (const hosted of options.hosted ?? []) {
+    const origin = hostedOrigin(url, hosted.slug);
+    if (origin) byHost.set(new URL(origin).host.toLowerCase(), hosted.app(origin, url));
+    app.route(`/hosted/${hosted.slug}`, hosted.app(`${url}/hosted/${hosted.slug}`, url));
+  }
+  if (byHost.size) {
+    app.use("*", async (c, next) => {
+      const host = (c.req.header("host") ?? "").toLowerCase();
+      const hit = byHost.get(host);
+      if (hit) return hit.fetch(c.req.raw);
+      await next();
+    });
+  }
+
+  app.get("/", (c) => {
+    if (wantsHtml(c)) {
+      const q = c.req.query("q") || undefined;
+      const tag = c.req.query("tag") || undefined;
+      return c.html(directoryPage(page(c), { relays: store.listRelays({ q, tag, limit: 200 }), q, tag, tags: store.tags() }));
+    }
+    return c.json({
+      name: siteName,
       version: VERSION,
       openmcp: OPENMCP_VERSION,
       spec: "https://logicsrc.com/openmcp",
       descriptor: `${url}/.well-known/openmcp.json`,
+      directory: `${url}/relays`,
       endpoints: [
         "GET  /v1/relays?q=&tag=&online=1",
         "POST /v1/relays {url}",
         "GET  /v1/relays/:id",
         "POST /v1/relays/:id/refresh",
-        "DELETE /v1/relays/:id (admin)",
+        "DELETE /v1/relays/:id (owner or admin)",
         "GET  /v1/relays/:id/tools",
         "POST /v1/relays/:id/call {tool, arguments, token?}",
         "GET  /v1/tools?q=",
+        "POST /v1/auth/magic {email}",
+        "GET  /v1/me (session cookie)",
         "POST /v1/webhooks {url, events?, relays?, secret?}",
         "GET  /v1/webhooks/:id",
         "DELETE /v1/webhooks/:id",
@@ -93,12 +178,138 @@ export function createApp(options: ServerOptions): Hono {
         "POST /v1/peers/sync (admin)",
         "POST /mcp",
       ],
+      hosted: (options.hosted ?? []).map((hosted) => hostedOrigin(url, hosted.slug) ?? `${url}/hosted/${hosted.slug}`),
       mcp: { endpoint: `${url}/mcp`, transport: "streamable-http", tools: TOOLS.length },
-    }),
-  );
+    });
+  });
 
   app.get("/healthz", (c) => c.json({ ok: true, version: VERSION, ...store.counts() }));
   app.get("/.well-known/openmcp.json", (c) => c.json(descriptor()));
+
+  // --- pages ------------------------------------------------------------------
+
+  app.get("/relays", (c) => {
+    const q = c.req.query("q") || undefined;
+    const tag = c.req.query("tag") || undefined;
+    return c.html(directoryPage(page(c), { relays: store.listRelays({ q, tag, limit: 200 }), q, tag, tags: store.tags() }));
+  });
+  app.get("/tags", (c) => c.html(tagsPage(page(c), store.tags())));
+  app.get("/relays/:id", (c) => {
+    const relay = store.getRelay(c.req.param("id"));
+    const p = page(c);
+    if (!relay) return c.html(directoryPage(p, { relays: [], tags: store.tags() }), 404);
+    const mine = Boolean(p.user && store.relayOwner(relay.id) === p.user.id);
+    return c.html(relayPage(p, relay, mine));
+  });
+
+  for (const mode of ["sign-in", "sign-up"] as const) {
+    app.get(`/${mode}`, (c) => (who(c) ? c.redirect("/me") : c.html(signInPage(page(c), mode))));
+    app.post(`/${mode}`, async (c) => {
+      if (!sameSite(c)) return c.text("Forbidden", 403);
+      const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+      const outcome = await requestSignInLink(auth, form.email);
+      if (!outcome.ok && outcome.error === "invalid-email") return c.html(signInPage(page(c), mode, "That does not look like an email address."), 400);
+      if (!outcome.ok) return c.html(signInPage(page(c), mode, "Mail is not working right now. Try again in a while."), 503);
+      return c.html(linkSentPage(page(c)));
+    });
+  }
+
+  app.get("/auth/magic", (c) => {
+    const outcome = consumeSignInLink(auth, c.req.query("t"));
+    if (!outcome.ok) return c.html(linkFailedPage(page(c)), 400);
+    c.header("set-cookie", sessionCookie(outcome.session, secure));
+    log(`${outcome.created ? "new account" : "signed in"}: ${outcome.email}`);
+    return c.redirect("/me");
+  });
+
+  app.post("/auth/sign-out", (c) => {
+    if (!sameSite(c)) return c.text("Forbidden", 403);
+    endSession(auth, cookieValue(c.req.header("cookie"), SESSION_COOKIE));
+    c.header("set-cookie", clearedSessionCookie(secure));
+    return c.redirect("/");
+  });
+
+  app.get("/me", (c) => {
+    const p = page(c);
+    if (!p.user) return c.redirect("/sign-in");
+    return c.html(mePage(p, store.listRelaysByOwner(p.user.id)));
+  });
+
+  app.post("/me/relays", async (c) => {
+    const p = page(c);
+    if (!p.user) return c.redirect("/sign-in");
+    if (!sameSite(c)) return c.text("Forbidden", 403);
+    const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+    const outcome = await register(typeof form.url === "string" ? form.url : "", p.user);
+    return c.html(mePage(p, store.listRelaysByOwner(p.user.id), { text: outcome.message, bad: !outcome.ok }), outcome.ok ? 200 : 422);
+  });
+
+  app.post("/me/relays/:id/refresh", async (c) => {
+    const p = page(c);
+    if (!p.user) return c.redirect("/sign-in");
+    if (!sameSite(c)) return c.text("Forbidden", 403);
+    const id = c.req.param("id");
+    if (store.relayOwner(id) !== p.user.id) return c.html(mePage(p, store.listRelaysByOwner(p.user.id), { text: "That relay is not yours.", bad: true }), 403);
+    const record = await refresh(id);
+    return c.html(mePage(p, store.listRelaysByOwner(p.user.id), { text: record ? `Probed ${record.id}: ${record.online ? `online, ${record.tools.length} tools` : `offline (${record.lastError})`}.` : "No such relay.", bad: !record?.online }));
+  });
+
+  app.post("/me/relays/:id/remove", (c) => {
+    const p = page(c);
+    if (!p.user) return c.redirect("/sign-in");
+    if (!sameSite(c)) return c.text("Forbidden", 403);
+    const id = c.req.param("id");
+    if (store.relayOwner(id) !== p.user.id) return c.html(mePage(p, store.listRelaysByOwner(p.user.id), { text: "That relay is not yours.", bad: true }), 403);
+    remove(id);
+    return c.html(mePage(p, store.listRelaysByOwner(p.user.id), { text: `Removed ${id}.` }));
+  });
+
+  // --- the operations the doors share ------------------------------------------------------------------
+
+  /** Probe and list. A signed-in registrant owns the record unless somebody else already does. */
+  async function register(given: string, user: SessionUser | null): Promise<{ ok: boolean; status: number; message: string; record?: import("./spec.ts").RelayRecord; event?: CatalogEvent | null; created?: boolean }> {
+    if (!/^https?:\/\//i.test(given.trim())) return { ok: false, status: 400, message: "Send {url}: the relay's /.well-known/openmcp.json, its MCP endpoint, or its site." };
+    let previous = null;
+    try {
+      previous = store.getRelay(relayId(given.trim()));
+    } catch {
+      return { ok: false, status: 400, message: "That is not a URL." };
+    }
+    const record = await probeRelay(given.trim(), { fetch: options.fetch, previous });
+    if (!record.online && !record.verified) {
+      return { ok: false, status: 422, message: `Nothing at ${given.trim()} answered as a relay: ${record.lastError ?? "no descriptor and no MCP handshake"}.` };
+    }
+    const change = store.putRelay(record);
+    if (user) {
+      const owner = store.relayOwner(record.id);
+      if (!owner) store.setRelayOwner(record.id, user.id);
+    }
+    if (change.event) void deliver(store, change.event, record, { catalog: url, fetch: options.fetch, log });
+    log(`${change.previous ? "updated" : "registered"} ${record.id} (${record.online ? "online" : "offline"}, ${record.tools.length} tools)${user ? ` by ${user.email}` : ""}`);
+    return {
+      ok: true,
+      status: change.previous ? 200 : 201,
+      message: `${change.previous ? "Updated" : "Listed"} ${record.id}: ${record.online ? `online, ${record.tools.length} tools` : `offline (${record.lastError})`}${record.verified ? ", verified" : ", not verified: serve /.well-known/openmcp.json to be"}.`,
+      record,
+      event: change.event,
+      created: !change.previous,
+    };
+  }
+
+  async function refresh(id: string): Promise<import("./spec.ts").RelayRecord | null> {
+    const previous = store.getRelay(id);
+    if (!previous) return null;
+    const record = await probeRelay(previous.source, { fetch: options.fetch, previous });
+    const change = store.putRelay(record);
+    if (change.event) void deliver(store, change.event, record, { catalog: url, fetch: options.fetch, log });
+    return record;
+  }
+
+  function remove(id: string): boolean {
+    if (!store.removeRelay(id)) return false;
+    void deliver(store, "relay.removed", { id }, { catalog: url, fetch: options.fetch, log });
+    return true;
+  }
 
   // --- relays ------------------------------------------------------------------
 
@@ -114,27 +325,14 @@ export function createApp(options: ServerOptions): Hono {
 
   app.post("/v1/relays", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { url?: string };
-    const given = typeof body.url === "string" ? body.url.trim() : "";
-    if (!/^https?:\/\//i.test(given)) return c.json({ ok: false, error: "Send {url}: the relay's /.well-known/openmcp.json, its MCP endpoint, or its site." }, 400);
-    let previous = null;
-    try {
-      previous = store.getRelay(relayId(given));
-    } catch {
-      return c.json({ ok: false, error: "That is not a URL." }, 400);
-    }
-    const record = await probeRelay(given, { fetch: options.fetch, previous });
-    if (!record.online && !record.verified) {
-      return c.json({ ok: false, error: `Nothing at ${given} answered as a relay: ${record.lastError ?? "no descriptor and no MCP handshake"}.` }, 422);
-    }
-    const change = store.putRelay(record);
-    if (change.event) void deliver(store, change.event, record, { catalog: url, fetch: options.fetch, log });
-    log(`${change.previous ? "updated" : "registered"} ${record.id} (${record.online ? "online" : "offline"}, ${record.tools.length} tools)`);
-    return c.json({ ok: true, relay: record, event: change.event }, change.previous ? 200 : 201);
+    const outcome = await register(typeof body.url === "string" ? body.url : "", who(c));
+    if (!outcome.ok) return c.json({ ok: false, error: outcome.message }, outcome.status as 400 | 422);
+    return c.json({ ok: true, relay: outcome.record, event: outcome.event }, outcome.status as 200 | 201);
   });
 
   app.get("/v1/relays/:id", (c) => {
     const relay = store.getRelay(c.req.param("id"));
-    return relay ? c.json({ ok: true, relay }) : c.json({ ok: false, error: "No such relay." }, 404);
+    return relay ? c.json({ ok: true, relay, owned: store.relayOwner(relay.id) !== null }) : c.json({ ok: false, error: "No such relay." }, 404);
   });
 
   app.get("/v1/relays/:id/tools", (c) => {
@@ -152,10 +350,12 @@ export function createApp(options: ServerOptions): Hono {
   });
 
   app.delete("/v1/relays/:id", (c) => {
-    if (!isAdmin(c.req.header("authorization"))) return c.json({ ok: false, error: "Removing a relay needs the admin token." }, 401);
     const id = c.req.param("id");
-    if (!store.removeRelay(id)) return c.json({ ok: false, error: "No such relay." }, 404);
-    void deliver(store, "relay.removed", { id }, { catalog: url, fetch: options.fetch, log });
+    const user = who(c);
+    const owner = store.relayOwner(id);
+    const allowed = isAdmin(c.req.header("authorization")) || (user !== null && owner === user.id);
+    if (!allowed) return c.json({ ok: false, error: "Removing a relay needs the admin token, or a session that registered it." }, 401);
+    if (!remove(id)) return c.json({ ok: false, error: "No such relay." }, 404);
     return c.json({ ok: true, removed: id });
   });
 
@@ -179,6 +379,22 @@ export function createApp(options: ServerOptions): Hono {
   app.get("/v1/tools", (c) => {
     const q = c.req.query("q") ?? "";
     return c.json({ ok: true, tools: store.findTools(q, Number(c.req.query("limit") ?? 50)) });
+  });
+
+  // --- accounts ------------------------------------------------------------------
+
+  app.post("/v1/auth/magic", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { email?: unknown };
+    const outcome = await requestSignInLink(auth, body.email);
+    if (!outcome.ok && outcome.error === "invalid-email") return c.json({ ok: false, error: "Send {email}." }, 400);
+    if (!outcome.ok) return c.json({ ok: false, error: "Mail is not configured on this catalog." }, 503);
+    return c.json({ ok: true, note: "If that address can receive mail, a sign-in link is on its way. Opening it sets a session cookie." }, 202);
+  });
+
+  app.get("/v1/me", (c) => {
+    const user = who(c);
+    if (!user) return c.json({ ok: false, error: "Not signed in. POST /v1/auth/magic {email} and open the link." }, 401);
+    return c.json({ ok: true, user, relays: store.listRelaysByOwner(user.id) });
   });
 
   // --- webhooks ------------------------------------------------------------------
@@ -268,8 +484,37 @@ export function createApp(options: ServerOptions): Hono {
     }
   });
 
-  app.notFound((c) => c.json({ ok: false, error: "Not found" }, 404));
+  app.notFound((c) => (wantsHtml(c) ? c.html(directoryPage(page(c), { relays: [], tags: store.tags() }), 404) : c.json({ ok: false, error: "Not found" }, 404)));
   return app;
+}
+
+/** List the relays this process hosts, by probing them the way any relay is probed. Nothing is listed that did not answer. */
+export async function ensureHosted(options: ServerOptions): Promise<{ listed: string[] }> {
+  const { store } = options;
+  const url = options.url.replace(/\/+$/, "");
+  const listed: string[] = [];
+  for (const hosted of options.hosted ?? []) {
+    const origin = hostedOrigin(url, hosted.slug);
+    if (!origin) {
+      options.log?.(`hosted ${hosted.slug}: served under ${url}/hosted/${hosted.slug} only; a catalog at an IP or localhost has no subdomain to list it at`);
+      continue;
+    }
+    let previous = null;
+    try {
+      previous = store.getRelay(relayId(`${origin}/mcp`));
+    } catch {
+      continue;
+    }
+    const record = await probeRelay(`${origin}/.well-known/openmcp.json`, { fetch: options.fetch, previous });
+    if (!record.online && !record.verified) {
+      options.log?.(`hosted ${hosted.slug}: not listed, ${record.lastError ?? "no answer"} at ${origin}`);
+      continue;
+    }
+    const change = store.putRelay(record);
+    if (change.event) await deliver(store, change.event, record, { catalog: url, fetch: options.fetch, log: options.log });
+    listed.push(record.id);
+  }
+  return { listed };
 }
 
 /** Probe every relay again. What the daemon does on its schedule. */
@@ -286,6 +531,7 @@ export async function refreshAll(options: ServerOptions): Promise<{ probed: numb
       await deliver(store, change.event, record, { catalog: url, fetch: options.fetch, log: options.log });
     }
   }
+  await ensureHosted(options);
   return { probed: relays.length, changed };
 }
 
@@ -340,10 +586,12 @@ export function serve(options: ServeOptions): { app: Hono; stop: () => void } {
   const timers: NodeJS.Timeout[] = [];
   if (options.refreshEveryMs) timers.push(setInterval(() => void refreshAll(options).then((r) => options.log?.(`refresh: ${r.probed} probed, ${r.changed} changed`)), options.refreshEveryMs));
   if (options.syncEveryMs) timers.push(setInterval(() => void syncPeers(options).then((r) => options.log?.(`sync: ${r.peers} peers, ${r.learned} learned`)), options.syncEveryMs));
+  // The hosted relays list themselves once the listener is up; DNS may not be, so the refresh job tries again.
+  if (options.hosted?.length) timers.push(setTimeout(() => void ensureHosted(options).then((r) => options.log?.(`hosted: listed ${r.listed.join(", ") || "none"}`)), 3_000));
   return {
     app,
     stop: () => {
-      for (const timer of timers) clearInterval(timer);
+      for (const timer of timers) clearTimeout(timer);
       server.close();
     },
   };
