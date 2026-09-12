@@ -16,10 +16,20 @@ Every product that speaks MCP is a **relay**: an endpoint an agent can call. Tod
 - A catalog can host relays itself. This one hosts **Obscura**, a stealth headless browser: `fetch_page` returns any public web page as markdown, text, links or HTML, including pages that answer plain HTTP clients with 403.
 - Catalogs peer: one learns the other's relays, and still probes each one before listing it.
 
+## Install
+
+```sh
+curl -fsSL https://openmcp.logicsrc.com/install.sh | sh
+```
+
+One line puts the `openmcp` command under `~/.local`: no root, no system package manager, nothing outside your home directory. The catalog needs Node 24 (`node:sqlite`); if the box has none, the installer fetches an official build into the same private directory and the command uses that one. `openmcp update` re-runs the installer and `openmcp uninstall` removes exactly the paths it wrote, from a manifest, with no network. `openmcp where` says what is installed. `--version X` and `--prefix DIR` after `sh -s --` pin a release or move the root.
+
+Every catalog serves the script at `/install.sh`, and the copy it serves names that catalog as the place `update` comes back to. `npm install -g @logicsrc/openmcp` works too, on a Node 24 you manage yourself.
+
 ## Run a catalog
 
 ```sh
-npx @logicsrc/openmcp serve --port 8790 --url https://catalog.example --admin-token <token>
+openmcp serve --port 8790 --url https://catalog.example --admin-token <token>
 ```
 
 Node 24 or later, one SQLite file (`--db`), no build step. `OPENMCP_URL`, `OPENMCP_DB`, `OPENMCP_ADMIN_TOKEN`, `OPENMCP_NAME`, `OPENMCP_OPERATOR`, `OPENMCP_REFRESH_MINUTES` (10) and `OPENMCP_SYNC_MINUTES` (30) do the same from the environment. Without an admin token, removing other people's relays and managing peers are off; registration is always open.
@@ -41,7 +51,7 @@ The same over REST: `POST /v1/auth/magic {email}`, then the link sets the `openm
 ## Use one
 
 ```sh
-export OPENMCP_CATALOG=https://catalog.example
+export OPENMCP_CATALOG=https://catalog.example   # optional: openmcp.logicsrc.com is the default
 openmcp relays                              # what is listed
 openmcp add https://agenticjobs.work        # register by any URL on the relay's origin
 openmcp find "post an update"               # search every relay's tools

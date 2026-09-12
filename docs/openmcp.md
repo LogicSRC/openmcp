@@ -32,7 +32,7 @@ A relay serves a JSON document at `/.well-known/openmcp.json` on its own origin.
   "url": "https://agenticjobs.work",
   "auth": { "kind": "bearer", "url": "https://agenticjobs.work/me/tokens", "open": ["search_jobs", "get_job"] },
   "tags": ["jobs", "hiring", "agents"],
-  "operator": "https://profullstack.com/.well-known/openprofile.md",
+  "operator": "https://logicsrc.com/.well-known/openprofile.md",
   "webhooks": "https://agenticjobs.work/api/v1/webhooks",
   "tools": ["search_jobs", "get_job", "apply_to_job", "post_update"],
   "catalogs": ["https://openmcp.logicsrc.com"]
@@ -46,7 +46,7 @@ The rules, and every one degrades:
 3. **`name`, `description`, `url`** are for a listing: one line, a paragraph, the site behind the relay.
 4. **`auth.kind`** is `none`, `bearer`, `oauth` or `api-key`. `auth.url` is where a person gets a credential. `auth.open` names the tools that work with no credential. Absent `auth` means unstated, which a reader reports rather than assumes.
 5. **`tags`** are free-form and lowercase. A catalog groups by them.
-6. **`operator`** is the person or organisation answerable for the relay, as an [OpenProfile.md](https://logicsrc.com/openprofile) URL. An agent that meets a relay with no operator should say so.
+6. **`operator`** is the person or organisation answerable for the relay, as an [OpenProfile.md](/openprofile) URL. An agent that meets a relay with no operator should say so.
 7. **`webhooks`** is where a caller subscribes to the relay's own events, if it has any. Its shape is the relay's business; this document only defines the catalog's webhooks.
 8. **`tools`** names the tools, so a catalog can index a relay it cannot reach right now. What `tools/list` says wins over this list whenever both exist.
 9. **`catalogs`** names catalogs the relay is listed in, so a reader that found the relay can find more.
@@ -123,9 +123,7 @@ It exposes three doors to the same records.
 
 A delivery is one `POST` of `{id, event, at, catalog, relay}` with headers `X-OpenMCP-Event`, `X-OpenMCP-Delivery` and `X-OpenMCP-Signature: sha256=<hex HMAC-SHA256 of the raw body under the secret>`. A receiver verifies the signature over the raw body before reading it. Three attempts, then the failure is recorded; fifty consecutive failures and the subscription is inactive but still listed, so its owner can see why. The subscription id is unguessable and is the only handle on it; the secret is shown once.
 
-Registration is open. Anyone may register any relay, because nothing a registrant types is listed: the probe is. Removing a relay and changing peers need the catalog's admin credential. A catalog may also let a registrant prove an email address and keep the relays they registered that way as theirs to probe again and remove; how it does so is its own business, and the record it serves is the same either way.
-
-A catalog may host relays of its own: MCP servers that run inside the catalog's process. A hosted relay is still a relay. It has its own origin (a subdomain of the catalog is the natural one), serves its own descriptor there, and is probed and listed the way any other relay is, so a reader cannot tell a hosted relay from a listed one except by asking the operator. The reference catalog hosts [Obscura](https://github.com/h4ckf0r0day/obscura), a stealth headless browser, as `fetch_page`.
+Registration is open. Anyone may register any relay, because nothing a registrant types is listed: the probe is. Removing a relay and changing peers need the catalog's admin credential.
 
 ## Peering
 
@@ -153,12 +151,22 @@ A conforming client:
 
 ## Serving one
 
-By hand, or `openmcp descriptor <mcp url>` prints a template. [agenticjobs](https://agenticjobs.work), [tsbb](https://tsbb.dev) and [myna](https://mynaposter.com) serve one. The reference catalog runs on Node 24 with one SQLite file: `npx @logicsrc/openmcp serve`.
+By hand, or `openmcp descriptor <mcp url>` prints a template. [agenticjobs](https://agenticjobs.work), [tsbb](https://tsbb.dev) and [myna](https://mynaposter.com) serve one. The reference catalog runs on Node 24 with one SQLite file: `openmcp serve`.
+
+## The reference implementation
+
+[github.com/logicsrc/openmcp](https://github.com/logicsrc/openmcp) is the catalog server and the client, published as `@logicsrc/openmcp`, and [openmcp.logicsrc.com](https://openmcp.logicsrc.com) is a live catalog running it. One line installs the `openmcp` command under your home directory, with no root and no package manager, fetching Node 24 if the box does not have it:
+
+```sh
+curl -fsSL https://openmcp.logicsrc.com/install.sh | sh
+```
+
+`openmcp update` re-runs the installer; `openmcp uninstall` removes exactly the paths it wrote, from a manifest, with no network. The live catalog is the default target; `OPENMCP_CATALOG` or `--catalog` points the client at another.
 
 ## Related standards
 
-- [OpenProfile.md](https://logicsrc.com/openprofile): the `operator` behind a relay.
-- [OpenCreds](https://logicsrc.com/opencreds): where the credential a client passes to a relay is kept.
+- [OpenProfile.md](/openprofile): the `operator` behind a relay.
+- [OpenCreds](/opencreds): where the credential a client passes to a relay is kept.
 - [Model Context Protocol](https://modelcontextprotocol.io): what a relay speaks.
 
 ## Version history
