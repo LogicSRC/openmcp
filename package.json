@@ -1,0 +1,53 @@
+{
+  "name": "@logicsrc/openmcp",
+  "version": "0.1.0",
+  "description": "OpenMCP: an open catalog of MCP relays. A reference catalog server, and a client that speaks REST, MCP and webhooks.",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://logicsrc.com/openmcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/logicsrc/openmcp.git"
+  },
+  "bin": {
+    "openmcp": "bin/openmcp.mjs"
+  },
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./server": "./src/server.ts"
+  },
+  "files": [
+    "bin",
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node bin/openmcp.mjs serve",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "catalog",
+    "relay",
+    "directory",
+    "webhooks",
+    "logicsrc"
+  ]
+}
