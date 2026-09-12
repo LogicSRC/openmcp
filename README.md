@@ -28,7 +28,7 @@ Sign-in links go out through [Resend](https://resend.com): set `RESEND_API_KEY` 
 
 `OPENMCP_HOSTED=obscura` serves the Obscura relay from the same process, at `obscura.<catalog host>` (point that name at the same service, so the probe finds the descriptor on the relay's own origin and lists it verified) and under `/hosted/obscura` on the catalog's own origin. It needs the `obscura` binary on the `PATH` or at `OBSCURA_BIN`; the `Dockerfile` bundles release 0.2.2 from [h4ckf0r0day/obscura](https://github.com/h4ckf0r0day/obscura) on Debian, because the binary wants glibc 2.35. Three fetches at a time, a minute each at most, a megabyte of output, public hosts only.
 
-The `Dockerfile` and `railway.json` deploy it as one service with a volume at `/data`. The live catalog is [openmcp.logicsrc.com](https://openmcp.logicsrc.com), with Obscura at [obscura.openmcp.logicsrc.com](https://obscura.openmcp.logicsrc.com).
+The `Dockerfile` builds the image; `.github/workflows/image.yml` builds it on every push and publishes `ghcr.io/logicsrc/openmcp` (tagged by commit, by branch, `latest` from main, and by version from a `v*` tag). Production pulls that image, so what ships is what was built and tested, and no hosted builder is in the path. `railway.json` describes the one service, with a volume at `/data`. The live catalog is [openmcp.logicsrc.com](https://openmcp.logicsrc.com), with Obscura at [obscura.openmcp.logicsrc.com](https://obscura.openmcp.logicsrc.com).
 
 ## For people
 
