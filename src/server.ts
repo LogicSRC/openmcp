@@ -32,7 +32,7 @@ import { createMailer, type Mailer } from "./mail.ts";
 import { clearedSessionCookie, consumeSignInLink, cookieValue, endSession, requestSignInLink, sessionCookie, userForSession, SESSION_COOKIE, type AuthContext, type SessionUser } from "./auth.ts";
 import { directoryPage, linkFailedPage, linkSentPage, mePage, relayPage, signInPage, tagsPage, type PageContext } from "./pages.ts";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.3.1";
 
 /**
  * The installer, served from the package itself so the line on every page,
