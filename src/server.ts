@@ -31,8 +31,9 @@ import { CATALOG_EVENTS, OPENMCP_VERSION, relayId, type CatalogDescriptor, type 
 import { createMailer, type Mailer } from "./mail.ts";
 import { clearedSessionCookie, consumeSignInLink, cookieValue, endSession, requestSignInLink, sessionCookie, userForSession, SESSION_COOKIE, type AuthContext, type SessionUser } from "./auth.ts";
 import { directoryPage, linkFailedPage, linkSentPage, mePage, bulkPage, relayPage, signInPage, tagsPage, type PageContext } from "./pages.ts";
+import { ringDescriptor } from "./ring-footer.ts";
 
-export const VERSION = "0.4.0";
+export const VERSION = "0.4.1";
 
 /**
  * The installer, served from the package itself so the line on every page,
@@ -203,6 +204,7 @@ export function createApp(options: ServerOptions): Hono {
     }),
   );
   app.get("/.well-known/openmcp.json", (c) => c.json(descriptor()));
+  app.get("/.well-known/openwebring.json", (c) => ringDescriptor(`${url}/`, siteName) ?? c.json({ ok: false, error: "Not found" }, 404));
 
   // --- pages ------------------------------------------------------------------
 

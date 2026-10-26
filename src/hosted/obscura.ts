@@ -18,6 +18,8 @@ import { spawn } from "node:child_process";
 import { PROTOCOL_VERSION, failure, isNotification, isRequest, result, text, toolError, INVALID_PARAMS, METHOD_NOT_FOUND, PARSE_ERROR, type ToolDefinition, type ToolResult } from "../mcp/protocol.ts";
 import { OPENMCP_VERSION, type RelayDescriptor } from "../spec.ts";
 import type { HostedRelay } from "../server.ts";
+import { ringDescriptor, ringFooter } from "../ring-footer.ts";
+import { esc } from "../pages.ts";
 
 export const OBSCURA_VERSION = "0.2.2";
 export const FORMATS = ["markdown", "text", "html", "links", "original"] as const;
@@ -187,8 +189,14 @@ export function obscuraRelay(options: ObscuraOptions = {}): HostedRelay {
     app(base, catalogUrl) {
       const app = new Hono();
       const descriptor = descriptorFor(base, catalogUrl, options.operator);
-      app.get("/", (c) => c.json({ name: "Obscura", hosted: true, obscura: OBSCURA_VERSION, descriptor: `${base}/.well-known/openmcp.json`, mcp: `${base}/mcp`, tools: TOOLS.map((tool) => tool.name), catalog: catalogUrl }));
+      app.get("/", (c) => {
+        const info = { name: "Obscura", hosted: true, obscura: OBSCURA_VERSION, descriptor: `${base}/.well-known/openmcp.json`, mcp: `${base}/mcp`, tools: TOOLS.map((tool) => tool.name), catalog: catalogUrl };
+        const accept = c.req.header("accept") ?? "";
+        if (!accept.includes("text/html") || accept.includes("application/json")) return c.json(info);
+        return c.html(landingPage(base, catalogUrl));
+      });
       app.get("/.well-known/openmcp.json", (c) => c.json(descriptor));
+      app.get("/.well-known/openwebring.json", (c) => ringDescriptor(`${base}/`, "Obscura") ?? c.json({ ok: false, error: "Not found" }, 404));
       app.get("/healthz", (c) => c.json({ ok: true, inFlight }));
       app.get("/mcp", (c) => c.json({ ok: false, note: "POST JSON-RPC 2.0 here. No credential needed.", tools: TOOLS.map((tool) => tool.name) }, 405));
       app.post("/mcp", async (c) => {
@@ -227,4 +235,24 @@ export function obscuraRelay(options: ObscuraOptions = {}): HostedRelay {
       return app;
     },
   };
+}
+
+/** What a browser sees at the relay's root: what it is and how to call it. Agents get JSON. */
+export function landingPage(base: string, catalogUrl: string): string {
+  const tools = TOOLS.map((tool) => `<li><code>${esc(tool.name)}</code>: ${esc(tool.description ?? "")}</li>`).join("");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obscura · hosted MCP relay</title>
+<meta name="description" content="Obscura: a hosted MCP relay that fetches a web page with a stealth headless browser and returns it as markdown, text, HTML or links.">
+<link rel="alternate" type="application/json" href="/.well-known/openmcp.json">
+<style>:root{color-scheme:light dark}body{margin:0;font:16px/1.55 system-ui,sans-serif;background:Canvas;color:CanvasText}main{max-width:760px;margin:0 auto;padding:32px 20px}code,pre{font-family:ui-monospace,monospace;font-size:14px}pre{overflow-x:auto;padding:12px;border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:8px}a{color:inherit}</style>
+</head><body><main>
+<h1>Obscura</h1>
+<p>A hosted <a href="https://logicsrc.com/openmcp">OpenMCP</a> relay (obscura ${esc(OBSCURA_VERSION)}), listed in the <a href="${esc(catalogUrl)}/">${esc(new URL(catalogUrl).host)} catalog</a>. No credential needed.</p>
+<h2>Tools</h2><ul>${tools}</ul>
+<h2>Call it</h2><pre>curl -X POST ${esc(base)}/mcp -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'</pre>
+<p><a href="/.well-known/openmcp.json">Descriptor</a> · <a href="https://github.com/logicsrc/openmcp">Source</a></p>
+</main>
+${ringFooter(`${base}/`)}
+</body></html>`;
 }
