@@ -1,6 +1,6 @@
 {
   "name": "@logicsrc/openmcp",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "OpenMCP: an open catalog of MCP relays. A reference catalog server, and a client that speaks REST, MCP and webhooks.",
   "license": "MIT",
   "type": "module",
@@ -53,6 +53,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
+    "@profullstack/footer": "^0.2.6",
     "hono": "^4.13.7"
   },
   "devDependencies": {

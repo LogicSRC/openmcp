@@ -10,6 +10,7 @@
 import type { RelayRecord } from "./spec.ts";
 import type { SessionUser } from "./auth.ts";
 import { installLine } from "./manage.ts";
+import { ringFooter } from "./ring-footer.ts";
 
 export const esc = (value: unknown): string =>
   String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch] as string);
@@ -51,6 +52,7 @@ table { border-collapse: collapse; width: 100%; } td, th { text-align: left; pad
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .empty { color: var(--muted); padding: 30px 0; }
 footer { max-width: 1040px; margin: 0 auto; padding: 20px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); }
+footer.pfs-footer { max-width: none; padding: 0; border-top: 1px solid var(--line); }
 .narrow { max-width: 460px; }
 `;
 
@@ -74,6 +76,7 @@ export function layout(ctx: PageContext, title: string, body: string): string {
 <body><header><div class="in"><a class="brand" href="/">${esc(ctx.siteName)}</a><span class="meta">${ctx.counts.relays} relays · ${ctx.counts.online} online</span><nav><a href="/tags">Tags</a><a href="https://logicsrc.com/openmcp">Spec</a><a href="/.well-known/openmcp.json">JSON</a>${nav}</nav></div></header>
 <main>${body}</main>
 <footer>An <a href="https://logicsrc.com/openmcp">OpenMCP</a> catalog. Agents: <code>POST ${esc(ctx.url)}/mcp</code> or <code>GET ${esc(ctx.url)}/v1/relays</code>. From a terminal: <code>${esc(installLine(ctx.url))}</code>. Maintained by <a href="https://profullstack.com">Profullstack</a>.</footer>
+${ringFooter(`${ctx.url}/`)}
 </body></html>`;
 }
 
