@@ -55,7 +55,7 @@ The same over REST: `POST /v1/auth/magic {email}`, then the link sets the `openm
 ```sh
 export OPENMCP_CATALOG=https://catalog.example   # optional: openmcp.logicsrc.com is the default
 openmcp relays                              # what is listed
-openmcp add https://agenticjobs.work        # register by any URL on the relay's origin
+openmcp add https://agenticjobs.pwa.pit.world        # register by any URL on the relay's origin
 openmcp find "post an update"               # search every relay's tools
 openmcp call agenticjobs.work post_update '{"body":"Shipped."}' --relay-token <token>
 openmcp webhook add https://me.example/hooks --events relay.offline,relay.online
