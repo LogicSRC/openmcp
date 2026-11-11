@@ -32,7 +32,8 @@ const string = (description: string): Record<string, unknown> => ({ type: "strin
 export const TOOLS: ToolDefinition[] = [
   {
     name: "list_relays",
-    title: "List relays",
+    title: "List Relays",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: "The relays this catalog knows: MCP servers reachable over HTTP, with what each offers. Filter by a word, a tag, or online only.",
     inputSchema: object({
       q: string("A word to match against names, descriptions, tags and tool names."),
@@ -43,19 +44,22 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: "get_relay",
-    title: "Get a relay",
+    title: "Get Relay",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: "One relay in full: its descriptor, its tools with their schemas, and whether it is online and verified.",
     inputSchema: object({ id: string("The relay id, from list_relays.") }, ["id"]),
   },
   {
     name: "find_tool",
-    title: "Find a tool",
+    title: "Find Tool",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: "Search every online relay's tools by name or description. Answers with the relay each one lives on, for call_tool.",
     inputSchema: object({ q: string("What the tool should do, or part of its name."), limit: { type: "integer" } }, ["q"]),
   },
   {
     name: "call_tool",
-    title: "Call a relay's tool",
+    title: "Call Relay Tool",
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     description:
       "Call a tool on a relay through this catalog. The relay's answer comes back as-is. If the relay needs a credential, pass it as token; it is sent to the relay and never kept.",
     inputSchema: object(
@@ -70,20 +74,23 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: "register_relay",
-    title: "Register a relay",
+    title: "Register Relay",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: true },
     description:
       "Add an MCP server to the catalog by URL: its /.well-known/openmcp.json, its MCP endpoint, or its site. The catalog probes it and lists what it found; nothing is taken on trust.",
     inputSchema: object({ url: string("Any URL on the relay's origin.") }, ["url"]),
   },
   {
     name: "refresh_relay",
-    title: "Refresh a relay",
+    title: "Refresh Relay",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: true },
     description: "Probe a relay again now and update its record.",
     inputSchema: object({ id: string("The relay id.") }, ["id"]),
   },
   {
     name: "subscribe",
-    title: "Subscribe to catalog events",
+    title: "Subscribe to Catalog Events",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     description:
       "Get a POST when relays change: relay.registered, relay.updated, relay.online, relay.offline, relay.removed. Deliveries are signed with the secret (X-OpenMCP-Signature: sha256=hmac of the body). The id that comes back is the only way to manage the subscription; keep it.",
     inputSchema: object(
@@ -99,12 +106,14 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "unsubscribe",
     title: "Unsubscribe",
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true },
     description: "Remove a webhook subscription by id.",
     inputSchema: object({ id: string("The subscription id.") }, ["id"]),
   },
   {
     name: "list_peers",
-    title: "List peer catalogs",
+    title: "List Peer Catalogs",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: "Other catalogs this one syncs relays from.",
     inputSchema: object({}),
   },

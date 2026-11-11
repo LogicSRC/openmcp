@@ -114,7 +114,8 @@ export function acceptableUrl(value: unknown): { ok: true; url: string } | { ok:
 export const TOOLS: ToolDefinition[] = [
   {
     name: "fetch_page",
-    title: "Fetch a web page",
+    title: "Fetch Web Page",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true, idempotentHint: true },
     description:
       "Fetch a public web page through Obscura, a stealth headless browser that renders JavaScript and presents Chrome's TLS fingerprint, so pages that answer curl with 403 usually answer this. Returns the page as markdown (default), plain text, its links, the rendered HTML, or the original bytes. No credential needed.",
     inputSchema: {

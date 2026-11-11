@@ -47,6 +47,15 @@ export interface ToolDefinition {
   title?: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  annotations?: ToolAnnotations;
+}
+
+/** MCP tool hints (2025-06-18). Directories ask for all three booleans on every tool. */
+export interface ToolAnnotations {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  openWorldHint: boolean;
+  idempotentHint?: boolean;
 }
 
 export interface ToolResult {
