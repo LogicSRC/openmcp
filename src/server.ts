@@ -32,8 +32,9 @@ import { createMailer, type Mailer } from "./mail.ts";
 import { clearedSessionCookie, consumeSignInLink, cookieValue, endSession, requestSignInLink, sessionCookie, userForSession, SESSION_COOKIE, type AuthContext, type SessionUser } from "./auth.ts";
 import { directoryPage, linkFailedPage, linkSentPage, mePage, bulkPage, relayPage, signInPage, tagsPage, type PageContext } from "./pages.ts";
 import { ringDescriptor } from "./ring-footer.ts";
+import { robotsTxt, sitemapXml, TEXT_HEADERS, XML_HEADERS } from "./seo.ts";
 
-export const VERSION = "0.4.1";
+export const VERSION = "0.4.3";
 
 /**
  * The installer, served from the package itself so the line on every page,
@@ -205,6 +206,22 @@ export function createApp(options: ServerOptions): Hono {
   );
   app.get("/.well-known/openmcp.json", (c) => c.json(descriptor()));
   app.get("/.well-known/openwebring.json", (c) => ringDescriptor(`${url}/`, siteName) ?? c.json({ ok: false, error: "Not found" }, 404));
+
+  // --- crawlers: the directory pages and one page per relay, on the catalog's own origin
+  app.get("/robots.txt", (c) => c.body(robotsTxt(url, ["/v1/", "/mcp", "/me", "/auth/", "/bulk/"]), 200, TEXT_HEADERS));
+  app.get("/sitemap.xml", (c) => {
+    const relays = store.listRelays({ limit: 500 });
+    const newest = relays.map((relay) => relay.seenAt ?? relay.firstSeenAt).filter(Boolean).sort().pop() ?? null;
+    const entries = [
+      { loc: `${url}/`, lastmod: newest },
+      { loc: `${url}/relays`, lastmod: newest },
+      { loc: `${url}/tags` },
+      { loc: `${url}/sign-in` },
+      { loc: `${url}/sign-up` },
+      ...relays.map((relay) => ({ loc: `${url}/relays/${encodeURIComponent(relay.id)}`, lastmod: relay.seenAt ?? relay.firstSeenAt })),
+    ];
+    return c.body(sitemapXml(entries), 200, XML_HEADERS);
+  });
 
   // --- pages ------------------------------------------------------------------
 
