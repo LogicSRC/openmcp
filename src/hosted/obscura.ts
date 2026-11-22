@@ -20,6 +20,7 @@ import { OPENMCP_VERSION, type RelayDescriptor } from "../spec.ts";
 import type { HostedRelay } from "../server.ts";
 import { ringDescriptor, ringFooter } from "../ring-footer.ts";
 import { esc } from "../pages.ts";
+import { robotsTxt, sitemapXml, TEXT_HEADERS, XML_HEADERS } from "../seo.ts";
 
 export const OBSCURA_VERSION = "0.2.2";
 export const FORMATS = ["markdown", "text", "html", "links", "original"] as const;
@@ -198,6 +199,8 @@ export function obscuraRelay(options: ObscuraOptions = {}): HostedRelay {
       });
       app.get("/.well-known/openmcp.json", (c) => c.json(descriptor));
       app.get("/.well-known/openwebring.json", (c) => ringDescriptor(`${base}/`, "Obscura") ?? c.json({ ok: false, error: "Not found" }, 404));
+      app.get("/robots.txt", (c) => c.body(robotsTxt(base, ["/mcp"]), 200, TEXT_HEADERS));
+      app.get("/sitemap.xml", (c) => c.body(sitemapXml([{ loc: `${base}/` }]), 200, XML_HEADERS));
       app.get("/healthz", (c) => c.json({ ok: true, inFlight }));
       app.get("/mcp", (c) => c.json({ ok: false, note: "POST JSON-RPC 2.0 here. No credential needed.", tools: TOOLS.map((tool) => tool.name) }, 405));
       app.post("/mcp", async (c) => {
